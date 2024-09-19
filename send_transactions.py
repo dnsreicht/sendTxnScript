@@ -3,22 +3,31 @@ import time
 import getpass
 
 # Prompt the user for the base URL
-print("Please enter the base URL of your validator.")
+print("Enter the base URL of your validator.")
+print("Leave blank to use the default validator at https://rest.synnq.io")
 base_url = input("Base URL (e.g., http://localhost:8080): ").strip()
 
-# Ensure the base URL is provided
-while not base_url:
-    print("Base URL cannot be empty. Please enter a valid URL.")
-    base_url = input("Base URL (e.g., http://localhost:8080): ").strip()
+# Determine if the default validator is used
+if not base_url:
+    base_url = "https://rest.synnq.io"
+    use_default_validator = True
+else:
+    # Remove any trailing slashes from the base URL
+    base_url = base_url.rstrip('/')
+    use_default_validator = False
 
-# Remove any trailing slashes from the base URL
-base_url = base_url.rstrip('/')
-
-# Construct the endpoint URL
-endpoint_url = f"{base_url}/receive_data"
+# Construct the endpoint URL based on the validator
+if use_default_validator:
+    endpoint_url = f"{base_url}/transaction"  # Use /transaction endpoint for default validator
+else:
+    endpoint_url = f"{base_url}/receive_data"  # Use /receive_data endpoint for custom validator
 
 # Prompt the user for required information
-zkp_secret = input("Enter your ZKP Secret: ").strip()
+if not use_default_validator:
+    zkp_secret = input("Enter your ZKP Secret: ").strip()
+else:
+    zkp_secret = None  # Not needed for default validator
+
 sender_address = input("Enter the Sender's Address: ").strip()
 sender_private_key = getpass.getpass("Enter the Sender's Private Key: ").strip()
 receiver_address = input("Enter the Receiver's Address: ").strip()
@@ -44,30 +53,51 @@ if num_times_input.isdigit():
 else:
     num_times = 0  # Infinite loop if no valid number is provided
 
-# Prepare the payload
-payload = {
-    "secret": zkp_secret,
-    "data": {
+# Prepare the payload based on the validator
+if use_default_validator:
+    # Payload structure for the default validator using /transaction endpoint
+    payload = {
         "transaction_type": "payment",
         "sender": sender_address,
         "private_key": sender_private_key,
         "receiver": receiver_address,
         "amount": amount,
         "denom": denom,
-        "fee": 1,  # Adjust as necessary
         "flags": 1,  # Adjust as necessary
-        "data_type": "type_of_data",
+        "data_type": "storage",
         "data": {
-            "data": "some_data"
+            "key": "value"
         },
         "metadata": {
-            "meta": {
-                "value": "some_metadata_value"
-            }
+            "key": "value"
         },
         "model_type": "default_model"
     }
-}
+else:
+    # Payload structure for custom validator using /receive_data endpoint (includes secret)
+    payload = {
+        "secret": zkp_secret,
+        "data": {
+            "transaction_type": "payment",
+            "sender": sender_address,
+            "private_key": sender_private_key,
+            "receiver": receiver_address,
+            "amount": amount,
+            "denom": denom,
+            "fee": 1,  # Adjust as necessary
+            "flags": 1,  # Adjust as necessary
+            "data_type": "type_of_data",
+            "data": {
+                "data": "some_data"
+            },
+            "metadata": {
+                "meta": {
+                    "value": "some_metadata_value"
+                }
+            },
+            "model_type": "default_model"
+        }
+    }
 
 # Function to send the transaction
 def send_transaction():
