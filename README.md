@@ -52,7 +52,7 @@ This script sends transactions to a validator's endpoint at regular intervals. I
 
 
 
-## Steps to Use
+# Steps to Use
 1. **Clone the Repository**
    - **Command:**
      ```bash
