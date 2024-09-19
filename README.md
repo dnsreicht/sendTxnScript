@@ -1,12 +1,10 @@
 # Send Transactions Script
 
-**Base URL:** `http://rest.synnq.io`
-
 ---
 
 ## Overview
 
-This script sends transactions to a server endpoint at regular intervals. It prompts the user for necessary transaction details and securely handles sensitive information.
+This script sends transactions to your own validator's `/receive_data` endpoint at regular intervals. It prompts you for necessary transaction details and securely handles sensitive information.
 
 ---
 
@@ -42,7 +40,9 @@ This script sends transactions to a server endpoint at regular intervals. It pro
      python3 send_transactions.py
      ```
    - **Description:** The script will prompt you for the following information:
-     - **Base URL** (press Enter to use default: `http://rest.synnq.io`)
+     - **Base URL of Your Validator**
+       - Example: `http://localhost:8080`
+       - **Note:** No default value is provided. You must enter your own validator's base URL.
      - **ZKP Secret**
      - **Sender's Address**
      - **Sender's Private Key**
@@ -52,7 +52,27 @@ This script sends transactions to a server endpoint at regular intervals. It pro
      - **Number of Times to Send the Transaction** (press Enter for infinite)
 
 5. **Done**
-   - The script will start sending transactions based on your input. You can stop it anytime by pressing `Ctrl+C`.
+   - The script will start sending transactions based on your input.
+   - **Note:** You can stop it anytime by pressing `Ctrl+C`.
+
+---
+
+## Important Notes
+
+- **Validator Requirement**
+  - You must have your own validator running and accessible at the base URL you provide.
+  - The script sends transactions to the `/receive_data` endpoint of your validator.
+
+- **Security Considerations**
+  - The script securely collects sensitive information like private keys without displaying them.
+  - Ensure you run the script in a secure environment to protect your data.
+
+- **Adjusting the Interval**
+  - The script sends transactions every 5 seconds by default.
+  - You can change the interval by modifying the `time.sleep(5)` line in the script.
+
+- **Stopping the Script**
+  - If running indefinitely, you can stop the script at any time by pressing `Ctrl+C`.
 
 ---
 
