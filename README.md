@@ -1,12 +1,44 @@
-# Send Transactions Script
-
-**Default Base URL:** https://rest.synnq.io
-
----
-
 ## Overview
 
 This script sends transactions to a validator's endpoint at regular intervals. It adjusts the endpoint and payload based on whether you're using the default validator (https://rest.synnq.io) or your own custom validator.
+
+---
+
+# Send Transactions Script
+
+## Steps to Use
+
+1. **Clone the Repository**
+   - **Command:**
+     ```bash
+     git clone https://github.com/dnsreicht/sendTxnScript.git
+     cd sendTxnScript
+     ```
+
+2. **Set Up a Virtual Environment (Optional but Recommended)**
+   - **Commands:**
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
+   - **Note:** On Windows, activate the virtual environment using:
+     ```bash
+     venv\Scripts\activate
+     ```
+
+3. **Install Dependencies**
+   - **Command:**
+     ```bash
+     pip install requests
+     ```
+
+4. **Run the Script**
+   - **Command:**
+     ```bash
+     python3 send_transactions.py
+
+
+**Default Base URL:** https://rest.synnq.io
 
 ---
 
@@ -50,33 +82,3 @@ This script sends transactions to a validator's endpoint at regular intervals. I
 }
 
 
-## Steps to Use
-
-1. **Clone the Repository**
-   - **Command:**
-     ```bash
-     git clone https://github.com/dnsreicht/sendTxnScript.git
-     cd sendTxnScript
-     ```
-
-2. **Set Up a Virtual Environment (Optional but Recommended)**
-   - **Commands:**
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
-   - **Note:** On Windows, activate the virtual environment using:
-     ```bash
-     venv\Scripts\activate
-     ```
-
-3. **Install Dependencies**
-   - **Command:**
-     ```bash
-     pip install requests
-     ```
-
-4. **Run the Script**
-   - **Command:**
-     ```bash
-     python3 send_transactions.py
