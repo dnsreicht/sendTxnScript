@@ -2,7 +2,7 @@
 
 # Transaction Sender
 
-A Python script to automate sending transactions to a validator API. It incorporates Zero-Knowledge Proof (ZKP) secret generation, node ID retrieval, and supports both custom and default validator endpoints with options for `"payment"` and `"storage"` transaction types.
+A Python script to automate sending transactions to a validator API. It incorporates Zero-Knowledge Proof (ZKP) secret generation, node ID retrieval
 
 ## Prompts
 
