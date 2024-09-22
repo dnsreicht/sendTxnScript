@@ -51,7 +51,6 @@ All configurations are handled interactively through user prompts. Ensure you pr
 
 ## Logging
 
-- **Console**: Displays `INFO` level logs for transaction status and general information.
 
 ## Installation
 
