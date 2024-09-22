@@ -5,6 +5,7 @@ import uuid
 from urllib.parse import urlparse
 import logging
 import json
+from decimal import Decimal, InvalidOperation
 
 class TransactionSender:
     def __init__(self, config):
@@ -15,23 +16,20 @@ class TransactionSender:
 
     def _setup_logging(self):
         logger = logging.getLogger('TransactionSender')
-        logger.setLevel(logging.DEBUG)  # Capture all levels of logs
+        logger.setLevel(logging.DEBUG)
 
         formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
-        # Console handler - only INFO and above
         ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)  # Set console to INFO to hide DEBUG logs
+        ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-        # File handler - DEBUG and above
         fh = logging.FileHandler("send_transactions.log")
-        fh.setLevel(logging.DEBUG)  # Log all levels to file
+        fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
         logger.addHandler(fh)
 
-        # Prevent log messages from being propagated to the root logger
         logger.propagate = False
 
         return logger
@@ -87,72 +85,64 @@ class TransactionSender:
             return None
 
     def map_transaction_type_to_data_type(self, transaction_type):
-        """
-        Maps transaction_type to data_type based on predefined rules.
-        Adjust this mapping as per your validator's requirements.
-        """
         mapping = {
             "payment": "type_of_data",
             "storage": "storage"
         }
-        return mapping.get(transaction_type, "type_of_data")  # Default to "type_of_data"
+        return mapping.get(transaction_type, "type_of_data")
 
     def construct_payload(self, node_id):
+        transaction_type = self.config.get('payment')
         if node_id:
-            # For custom URLs: POST to /receive_data with 'data' containing transaction details
             payload = {
                 "secret": self.zkp_secret,
                 "data": {
                     "transaction_type": "payment",
                     "sender": self.config['sender_address'],
-                    "private_key": self.config['sender_private_key'],  # Actual key sent to API
+                    "private_key": self.config['sender_private_key'],
                     "receiver": self.config['receiver_address'],
-                    "amount": self.config['amount'],
+                    "amount": (self.config['amount']),
                     "denom": self.config['denom'],
                     "flags": 1,
                     "fee": 1,
                     "data_type": "type_of_data",
-                    "data": {
-                        "data": "some_data" 
-                    },
-                    "metadata": {
-                        "meta": {
-                            "value": "some_metadata_value"
-                        }
-                    },
-                    "model_type": "default_model"
-                }
+        "data": {
+            "data": "some_data" 
+        },
+        "metadata": {
+            "meta": {
+                "value": "some_metadata_value"
             }
+        },
+        "model_type": "default_model"
+    }
+}
         else:
-            # For default URL: POST to /transaction with flat structure
             payload = {
                 "secret": self.zkp_secret,
                 "transaction_type": "payment",
                 "sender": self.config['sender_address'],
-                "private_key": self.config['sender_private_key'],  # Actual key sent to API
+                "private_key": self.config['sender_private_key'],
                 "receiver": self.config['receiver_address'],
-                "amount": self.config['amount'],
+                "amount": (self.config['amount']),
                 "denom": self.config['denom'],
                 "flags": 1,
                 "fee": 1,
                 "data_type": "type_of_data",
-                "data": {
-                    "data": "some_data" 
-                },
-                "metadata": {
-                    "meta": {
-                        "value": "some_metadata_value"
-                    }
-                },
-                "model_type": "default_model"
+        "data": {
+            "data": "some_data" 
+        },
+        "metadata": {
+            "meta": {
+                "value": "some_metadata_value"
             }
+        },
+        "model_type": "default_model"
+    }
         return payload
 
     def mask_sensitive_data(self, payload):
-        """
-        Masks sensitive data like private_key in the payload for logging purposes.
-        """
-        masked_payload = json.loads(json.dumps(payload))  # Deep copy
+        masked_payload = json.loads(json.dumps(payload))
         if 'private_key' in masked_payload:
             masked_payload['private_key'] = "*****"
         elif 'data' in masked_payload and 'private_key' in masked_payload['data']:
@@ -161,8 +151,7 @@ class TransactionSender:
 
     def send_transaction(self, endpoint, payload, fallback_endpoint=None, fallback_payload=None):
         try:
-            # Mask sensitive data before logging
-            self.logger.debug(f"Payload being sent: {json.dumps(self.mask_sensitive_data(payload), indent=4)}")  # Logged only in file
+            self.logger.debug(f"Payload being sent: {json.dumps(self.mask_sensitive_data(payload), indent=4)}")
             response = self.session.post(endpoint, json=payload)
             if response.status_code in [200, 201]:
                 self.logger.info(f"Transaction successful. Status Code: {response.status_code}")
@@ -198,7 +187,7 @@ class TransactionSender:
             self.logger.info("Using custom validator endpoint.")
         else:
             primary_endpoint = "https://rest.synnq.io/transaction"
-            fallback_endpoint = None  # No fallback for default endpoint
+            fallback_endpoint = None
             self.logger.info("Using default validator endpoint: https://rest.synnq.io/transaction")
 
         primary_payload = self.construct_payload(node_id)
@@ -226,20 +215,19 @@ def get_user_input():
 
     while True:
         try:
-            amount = int(input("Enter the Amount to Send (must be a whole number): ").strip())
-            if amount >= 0:
+            amount_input = input("Enter the Amount to Send (whole number only): ").strip()
+            amount = int(amount_input)
+            if amount > 0:
                 break
             else:
-                print("Amount must be a non-negative integer.")
-        except ValueError:
-            print("Invalid amount. Please enter a whole number.")
+                print("Amount must be a non-negative number.")
+        except InvalidOperation:
+            print("Invalid amount. Please enter a valid number.")
 
     denom = input("Enter the Denomination (Token Ticker): ").strip()
 
-
-    # Number of transactions
     num_times_input = input("Enter the number of times to send the transaction (default is 1): ").strip()
-    num_times = int(num_times_input) if num_times_input.isdigit() else 1  # default is 1
+    num_times = int(num_times_input) if num_times_input.isdigit() else 1
 
     return {
         "base_url": base_url,
@@ -250,7 +238,7 @@ def get_user_input():
         "amount": amount,
         "denom": denom,
         "num_times": num_times,
-        "interval": 5  # seconds
+        "interval": 0.1,
     }
 
 if __name__ == "__main__":
