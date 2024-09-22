@@ -3,298 +3,141 @@ import time
 import getpass
 import uuid
 from urllib.parse import urlparse
+import logging
+import json
 
-# Function to generate ZKP secret
-def generate_zkp_secret():
-    generated_secret = str(uuid.uuid4())
-    zkp_payload = {"secret": generated_secret}
-    try:
-        response = requests.post("https://zkp.synnq.io/generate", json=zkp_payload)
-        if response.status_code == 200:
-            print("ZKP Secret generated successfully.")
-            return generated_secret
-        else:
-            print(f"Failed to generate ZKP Secret. Status Code: {response.status_code}")
-            print(f"Response: {response.text}")
+class TransactionSender:
+    def __init__(self, config):
+        self.config = config
+        self.session = self._setup_session()
+        self.logger = self._setup_logging()
+        self.zkp_secret = self.generate_zkp_secret()
+
+    def _setup_logging(self):
+        logger = logging.getLogger('TransactionSender')
+        logger.setLevel(logging.DEBUG)  # Capture all levels of logs
+
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+        # Console handler - only INFO and above
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)  # Set console to INFO to hide DEBUG logs
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+        # File handler - DEBUG and above
+        fh = logging.FileHandler("send_transactions.log")
+        fh.setLevel(logging.DEBUG)  # Log all levels to file
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+
+        # Prevent log messages from being propagated to the root logger
+        logger.propagate = False
+
+        return logger
+
+    def _setup_session(self):
+        session = requests.Session()
+        retries = requests.adapters.Retry(
+            total=5,
+            backoff_factor=1,
+            status_forcelist=[500, 502, 503, 504]
+        )
+        adapter = requests.adapters.HTTPAdapter(max_retries=retries)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+        return session
+
+    def generate_zkp_secret(self):
+        secret = str(uuid.uuid4())
+        try:
+            response = self.session.post("https://zkp.synnq.io/generate", json={"secret": secret})
+            if response.status_code == 200:
+                self.logger.info("ZKP Secret generated successfully.")
+                return secret
+            else:
+                self.logger.error(f"Failed to generate ZKP Secret. Status Code: {response.status_code}")
+                self.logger.error(f"Response: {response.text}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error generating ZKP Secret: {e}")
             return None
-    except Exception as e:
-        print(f"An error occurred while generating ZKP Secret: {e}")
-        return None
 
-# Function to retrieve node ID based on matching address and validator type
-def get_node_id(base_url, is_default_validator):
-    try:
-        # Nodes endpoint is the same for both validators as per your latest input
+    def get_node_id(self):
         nodes_endpoint = "https://node.synnq.io/nodes"
-        
-        # Fetch the nodes list from the endpoint
-        response = requests.get(nodes_endpoint)
-        if response.status_code == 200:
-            nodes = response.json()
-            if isinstance(nodes, list) and len(nodes) > 0:
-                # Parse the base URL to extract the network location (netloc)
-                parsed_url = urlparse(base_url)
-                host_port = parsed_url.netloc if parsed_url.netloc else base_url.rstrip('/')
-
-                # Iterate through the list to find a matching address
+        try:
+            response = self.session.get(nodes_endpoint)
+            if response.status_code == 200:
+                nodes = response.json()
+                host = urlparse(self.config['base_url']).netloc or self.config['base_url'].rstrip('/')
                 for node in nodes:
-                    if node.get("address") == host_port:
+                    if node.get("address") == host:
                         node_id = node.get("id")
                         if node_id:
-                            print(f"Node ID retrieved: {node_id}")
+                            self.logger.info(f"Node ID retrieved: {node_id}")
                             return node_id
-                        else:
-                            print(f"Node with address {host_port} does not have an 'id'.")
-                            return None
-                # If no matching address is found
-                print(f"No node found with address matching {host_port}.")
+                self.logger.warning(f"No node found with address matching {host}. Using default endpoint.")
                 return None
             else:
-                print("No nodes found in the response.")
+                self.logger.error(f"Failed to retrieve Node ID. Status Code: {response.status_code}")
+                self.logger.error(f"Response: {response.text}")
                 return None
-        else:
-            print(f"Failed to retrieve Node ID. Status Code: {response.status_code}")
-            print(f"Response: {response.text}")
+        except Exception as e:
+            self.logger.error(f"Error retrieving Node ID: {e}")
             return None
-    except Exception as e:
-        print(f"An error occurred while retrieving Node ID: {e}")
-        return None
 
-# Function to send transaction with optional fallback
-def send_transaction(endpoint, payload, fallback_endpoint=None, fallback_payload=None):
-    try:
-        response = requests.post(endpoint, json=payload)
-        if response.status_code in [200, 201]:
-            print(f"Transaction successful. Status Code: {response.status_code}")
-            print(f"Response Body: {response.text}")
-        else:
-            print(f"Failed to send transaction. Status Code: {response.status_code}")
-            print(f"Response Body: {response.text}")
-            # If fallback is provided, attempt to send to fallback
-            if fallback_endpoint and fallback_payload:
-                print("Attempting to send transaction to fallback endpoint...")
-                fallback_response = requests.post(fallback_endpoint, json=fallback_payload)
-                if fallback_response.status_code in [200, 201]:
-                    print(f"Fallback Transaction successful. Status Code: {fallback_response.status_code}")
-                    print(f"Response Body: {fallback_response.text}")
-                else:
-                    print(f"Fallback Transaction failed. Status Code: {fallback_response.status_code}")
-                    print(f"Response Body: {fallback_response.text}")
-    except Exception as e:
-        print(f"An error occurred while sending transaction: {e}")
-        # If fallback is provided, attempt to send to fallback
-        if fallback_endpoint and fallback_payload:
-            try:
-                print("Attempting to send transaction to fallback endpoint...")
-                fallback_response = requests.post(fallback_endpoint, json=fallback_payload)
-                if fallback_response.status_code in [200, 201]:
-                    print(f"Fallback Transaction successful. Status Code: {fallback_response.status_code}")
-                    print(f"Response Body: {fallback_response.text}")
-                else:
-                    print(f"Fallback Transaction failed. Status Code: {fallback_response.status_code}")
-                    print(f"Response Body: {fallback_response.text}")
-            except Exception as fallback_e:
-                print(f"An error occurred while sending fallback transaction: {fallback_e}")
-
-# Function to construct payload for custom validator
-def construct_custom_validator_payload(zkp_secret, sender_address, sender_private_key, receiver_address, amount, denom, node_id=None):
-    payload = {
-        "secret": zkp_secret,
-        "data": {
-            "transaction_type": "payment",
-            "sender": sender_address,
-            "private_key": sender_private_key,
-            "receiver": receiver_address,
-            "amount": amount,
-            "denom": denom,
-            "fee": 1,
-            "flags": 1,
-            "data_type": "type_of_data",
-            "data": {
-                "data": "some_data" 
-            },
-            "metadata": {
-                "meta": {
-                    "value": "some_metadata_value"
-                }
-            },
-            "model_type": "default_model"
+    def map_transaction_type_to_data_type(self, transaction_type):
+        """
+        Maps transaction_type to data_type based on predefined rules.
+        Adjust this mapping as per your validator's requirements.
+        """
+        mapping = {
+            "payment": "type_of_data",
+            "storage": "storage"
         }
-    }
-    if node_id:
-        payload["data"]["node_id"] = node_id
-    return payload
+        return mapping.get(transaction_type, "type_of_data")  # Default to "type_of_data"
 
-# Function to construct payload for default validator
-def construct_default_validator_payload(zkp_secret, sender_address, sender_private_key, receiver_address, amount, denom, node_id=None):
-    payload = {
-        "secret": zkp_secret,
-        "transaction_type": "payment",
-        "sender": sender_address,
-        "private_key": sender_private_key,
-        "receiver": receiver_address,
-        "amount": amount,
-        "denom": denom,
-        "flags": 1,
-        "data_type": "storage",
-        "data": {
-            "data": "some_data" 
-        },
-        "metadata": {
-            "meta": {
-                "value": "some_metadata_value"
-            }
-        },
-        "model_type": "default_model"
-    }
-    if node_id:
-        payload["node_id"] = node_id
-    return payload
-
-# Prompt the user for the base URL
-print("Enter the base URL of your validator.")
-print("Leave blank to use the default validator at https://rest.synnq.io")
-base_url = input("Base URL (e.g., http://localhost:8080): ").strip()
-
-# Determine if the default validator is used
-if not base_url:
-    base_url = "https://rest.synnq.io"
-    use_default_validator = True
-else:
-    # Remove any trailing slashes from the base URL
-    base_url = base_url.rstrip('/')
-    use_default_validator = False
-
-# Construct the primary and fallback endpoint URLs based on the validator
-if use_default_validator:
-    primary_endpoint = f"{base_url}/transaction"  # Use /transaction endpoint for default validator
-    fallback_endpoint = "https://node.synnq.io/transaction"  # Fallback URL for default validator
-else:
-    primary_endpoint = f"{base_url}/receive_data"  # Use /receive_data endpoint for custom validator
-    fallback_endpoint = "https://node.synnq.io/receive_data"  # Fallback URL for custom validator
-
-# Initialize fallback_payload to None to prevent NameError
-fallback_payload = None
-
-# Retrieve Node ID
-node_id = get_node_id(base_url, use_default_validator)
-if not node_id:
-    # Prompt the user to proceed without node_id
-    proceed = input("No Matching ID found, do you want to proceed without a Node ID? (yes/no): ").strip().lower()
-    if proceed in ['yes', 'y']:
-        node_id = None  # Explicitly set node_id to None
-        # When proceeding without node_id, transactions should be sent to fallback_endpoint directly
-        # No further fallback is needed
-    else:
-        print("Cannot proceed without a valid Node ID.")
-        exit(1)
-
-# Generate ZKP Secret (always generate)
-zkp_secret = generate_zkp_secret()
-if not zkp_secret:
-    print("Cannot proceed without a valid ZKP Secret.")
-    exit(1)
-
-# Prompt the user for required information
-sender_address = input("Enter the Sender's Address: ").strip()
-sender_private_key = getpass.getpass("Enter the Sender's Private Key: ").strip()
-receiver_address = input("Enter the Receiver's Address: ").strip()
-
-# Validate and parse the amount
-while True:
-    amount_input = input("Enter the Amount to Send (must be a whole number): ").strip()
-    try:
-        amount = int(amount_input)
-        if amount >= 0:
-            break
-        else:
-            print("Amount must be a non-negative integer.")
-    except ValueError:
-        print("Invalid amount. Please enter a whole number.")
-
-denom = input("Enter the Denomination (Token Ticker): ").strip()
-
-# Optional: Ask how many times to send the transaction
-num_times_input = input("Enter the number of times to send the transaction (default is infinite): ").strip()
-if num_times_input.isdigit():
-    num_times = int(num_times_input)
-else:
-    num_times = 0  # Infinite loop if no valid number is provided
-
-# Prepare the payload based on the validator type
-if use_default_validator:
-    # Payload structure for the default validator using /transaction endpoint
-    payload = construct_default_validator_payload(
-        zkp_secret,
-        sender_address,
-        sender_private_key,
-        receiver_address,
-        amount,
-        denom,
-        node_id
-    )
-    # Prepare fallback payload (same as primary for default validator)
-    fallback_payload = payload.copy()
-else:
-    # Payload structure for custom validator using /receive_data endpoint (includes secret)
-    payload = construct_custom_validator_payload(
-        zkp_secret,
-        sender_address,
-        sender_private_key,
-        receiver_address,
-        amount,
-        denom,
-        node_id
-    )
-    # Prepare fallback payload (same structure as primary)
-    if node_id:
-        fallback_payload = construct_custom_validator_payload(
-            zkp_secret,
-            sender_address,
-            sender_private_key,
-            receiver_address,
-            amount,
-            denom,
-            node_id
-        )
-    else:
-        # If no node_id, fallback_payload can be the same as payload
-        fallback_payload = payload.copy()
-
-# If no node_id is found and proceeding, set fallback_payload to None
-if not node_id:
-    fallback_payload = None
-
-# Function to send transaction with proper payload
-def send_transaction_wrapper():
-    try:
+    def construct_payload(self, node_id):
         if node_id:
-            # If node_id is available, send to primary_endpoint with node_id
-            transaction_target = node_id
-        else:
-            # If no node_id, send to fallback_endpoint
-            transaction_target = fallback_endpoint.split('/')[2]  # Extract base URL without path
-        print(f"\nSending transaction to {transaction_target}...")
-        send_transaction(primary_endpoint, payload, fallback_endpoint, fallback_payload)
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        # As per user request, if fallback_payload is not defined, send to rest.synnq.io
-        if 'fallback_payload' not in locals() or fallback_payload is None:
-            print("Sending transaction to https://rest.synnq.io as a final fallback.")
-            rest_endpoint = "https://rest.synnq.io/transaction"
-            # Construct payload for rest.synnq.io
-            rest_payload = {
-                "secret": zkp_secret,
-                "transaction_type": "payment",
-                "sender": sender_address,
-                "private_key": sender_private_key,
-                "receiver": receiver_address,
-                "amount": amount,
-                "denom": denom,
-                "flags": 1,
-                "data_type": "storage",
+            # For custom URLs: POST to /receive_data with 'data' containing transaction details
+            payload = {
+                "secret": self.zkp_secret,
                 "data": {
-                    "data": "some_data"
+                    "transaction_type": "payment",
+                    "sender": self.config['sender_address'],
+                    "private_key": self.config['sender_private_key'],  # Actual key sent to API
+                    "receiver": self.config['receiver_address'],
+                    "amount": self.config['amount'],
+                    "denom": self.config['denom'],
+                    "flags": 1,
+                    "fee": 1,
+                    "data_type": "type_of_data",
+                    "data": {
+                        "data": "some_data" 
+                    },
+                    "metadata": {
+                        "meta": {
+                            "value": "some_metadata_value"
+                        }
+                    },
+                    "model_type": "default_model"
+                }
+            }
+        else:
+            # For default URL: POST to /transaction with flat structure
+            payload = {
+                "secret": self.zkp_secret,
+                "transaction_type": "payment",
+                "sender": self.config['sender_address'],
+                "private_key": self.config['sender_private_key'],  # Actual key sent to API
+                "receiver": self.config['receiver_address'],
+                "amount": self.config['amount'],
+                "denom": self.config['denom'],
+                "flags": 1,
+                "fee": 1,
+                "data_type": "type_of_data",
+                "data": {
+                    "data": "some_data" 
                 },
                 "metadata": {
                     "meta": {
@@ -303,29 +146,117 @@ def send_transaction_wrapper():
                 },
                 "model_type": "default_model"
             }
-            if node_id:
-                rest_payload["node_id"] = node_id
-            try:
-                rest_response = requests.post(rest_endpoint, json=rest_payload)
-                if rest_response.status_code in [200, 201]:
-                    print(f"Final Fallback Transaction successful. Status Code: {rest_response.status_code}")
-                    print(f"Response Body: {rest_response.text}")
-                else:
-                    print(f"Final Fallback Transaction failed. Status Code: {rest_response.status_code}")
-                    print(f"Response Body: {rest_response.text}")
-            except Exception as rest_e:
-                print(f"An error occurred while sending final fallback transaction: {rest_e}")
+        return payload
 
-# Sending transactions
-if num_times > 0:
-    for i in range(num_times):
-        print(f"\nSending transaction {i+1}/{num_times} to {'Node ID: ' + node_id if node_id else 'https://node.synnq.io'}...")
-        send_transaction_wrapper()
-        time.sleep(5)
-else:
-    count = 1
+    def mask_sensitive_data(self, payload):
+        """
+        Masks sensitive data like private_key in the payload for logging purposes.
+        """
+        masked_payload = json.loads(json.dumps(payload))  # Deep copy
+        if 'private_key' in masked_payload:
+            masked_payload['private_key'] = "*****"
+        elif 'data' in masked_payload and 'private_key' in masked_payload['data']:
+            masked_payload['data']['private_key'] = "*****"
+        return masked_payload
+
+    def send_transaction(self, endpoint, payload, fallback_endpoint=None, fallback_payload=None):
+        try:
+            # Mask sensitive data before logging
+            self.logger.debug(f"Payload being sent: {json.dumps(self.mask_sensitive_data(payload), indent=4)}")  # Logged only in file
+            response = self.session.post(endpoint, json=payload)
+            if response.status_code in [200, 201]:
+                self.logger.info(f"Transaction successful. Status Code: {response.status_code}")
+                try:
+                    response_json = response.json()
+                    pretty_response = json.dumps(response_json, indent=4)
+                    self.logger.info(f"Response:\n{pretty_response}")
+                except ValueError:
+                    self.logger.info(f"Response: {response.text}")
+            else:
+                self.logger.error(f"Failed to send transaction. Status Code: {response.status_code}")
+                try:
+                    response_json = response.json()
+                    pretty_response = json.dumps(response_json, indent=4)
+                    self.logger.error(f"Response:\n{pretty_response}")
+                except ValueError:
+                    self.logger.error(f"Response: {response.text}")
+                if fallback_endpoint and fallback_payload:
+                    self.logger.info("Attempting to send transaction to fallback endpoint...")
+                    self.send_transaction(fallback_endpoint, fallback_payload)
+        except Exception as e:
+            self.logger.error(f"Error sending transaction: {e}")
+            if fallback_endpoint and fallback_payload:
+                self.logger.info("Attempting to send transaction to fallback endpoint...")
+                self.send_transaction(fallback_endpoint, fallback_payload)
+
+    def run(self):
+        node_id = self.get_node_id()
+
+        if node_id:
+            primary_endpoint = f"{self.config['base_url']}/receive_data"
+            fallback_endpoint = "https://node.synnq.io/receive_data"
+            self.logger.info("Using custom validator endpoint.")
+        else:
+            primary_endpoint = "https://rest.synnq.io/transaction"
+            fallback_endpoint = None  # No fallback for default endpoint
+            self.logger.info("Using default validator endpoint: https://rest.synnq.io/transaction")
+
+        primary_payload = self.construct_payload(node_id)
+        fallback_payload = self.construct_payload(None) if node_id else None
+
+        num_times = self.config.get('num_times', 1)
+        count = 1
+
+        while num_times == 0 or count <= num_times:
+            target = f"Node ID: {node_id}" if node_id else "https://rest.synnq.io/transaction"
+            self.logger.info(f"Sending transaction {count}{'/' + str(num_times) if num_times else ''} to {target}...")
+            self.send_transaction(primary_endpoint, primary_payload, fallback_endpoint, fallback_payload)
+            count += 1
+            time.sleep(self.config.get('interval', 5))
+
+def get_user_input():
+    print("Enter the base URL of your validator.")
+    print("Leave blank to use the default validator at https://rest.synnq.io")
+    base_url = input("Base URL (e.g., http://localhost:8080): ").strip() or "https://rest.synnq.io"
+    use_custom_validator = base_url != "https://rest.synnq.io"
+
+    sender_address = input("Enter the Sender's Address: ").strip()
+    sender_private_key = getpass.getpass("Enter the Sender's Private Key: ").strip()
+    receiver_address = input("Enter the Receiver's Address: ").strip()
+
     while True:
-        print(f"\nSending transaction {count} to {'Node ID: ' + node_id if node_id else 'https://node.synnq.io'}...")
-        send_transaction_wrapper()
-        count += 1
-        time.sleep(5)
+        try:
+            amount = int(input("Enter the Amount to Send (must be a whole number): ").strip())
+            if amount >= 0:
+                break
+            else:
+                print("Amount must be a non-negative integer.")
+        except ValueError:
+            print("Invalid amount. Please enter a whole number.")
+
+    denom = input("Enter the Denomination (Token Ticker): ").strip()
+
+
+    # Number of transactions
+    num_times_input = input("Enter the number of times to send the transaction (default is 1): ").strip()
+    num_times = int(num_times_input) if num_times_input.isdigit() else 1  # default is 1
+
+    return {
+        "base_url": base_url,
+        "use_custom_validator": use_custom_validator,
+        "sender_address": sender_address,
+        "sender_private_key": sender_private_key,
+        "receiver_address": receiver_address,
+        "amount": amount,
+        "denom": denom,
+        "num_times": num_times,
+        "interval": 5  # seconds
+    }
+
+if __name__ == "__main__":
+    config = get_user_input()
+    sender = TransactionSender(config)
+    if sender.zkp_secret:
+        sender.run()
+    else:
+        print("Failed to generate ZKP Secret. Exiting.")
