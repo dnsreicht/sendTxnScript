@@ -5,12 +5,13 @@ import uuid
 from urllib.parse import urlparse
 import logging
 import json
+import asyncio
+import aiohttp  # To send requests asynchronously
 from decimal import Decimal, InvalidOperation
 
 class TransactionSender:
     def __init__(self, config):
         self.config = config
-        self.session = self._setup_session()
         self.logger = self._setup_logging()
         self.zkp_secret = self.generate_zkp_secret()
 
@@ -34,22 +35,10 @@ class TransactionSender:
 
         return logger
 
-    def _setup_session(self):
-        session = requests.Session()
-        retries = requests.adapters.Retry(
-            total=5,
-            backoff_factor=1,
-            status_forcelist=[500, 502, 503, 504]
-        )
-        adapter = requests.adapters.HTTPAdapter(max_retries=retries)
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
-        return session
-
     def generate_zkp_secret(self):
         secret = str(uuid.uuid4())
         try:
-            response = self.session.post("https://zkp.synnq.io/generate", json={"secret": secret})
+            response = requests.post("https://zkp.synnq.io/generate", json={"secret": secret})
             if response.status_code == 200:
                 self.logger.info("ZKP Secret generated successfully.")
                 return secret
@@ -64,7 +53,7 @@ class TransactionSender:
     def get_node_id(self):
         nodes_endpoint = "https://node.synnq.io/nodes"
         try:
-            response = self.session.get(nodes_endpoint)
+            response = requests.get(nodes_endpoint)
             if response.status_code == 200:
                 nodes = response.json()
                 host = urlparse(self.config['base_url']).netloc or self.config['base_url'].rstrip('/')
@@ -84,13 +73,6 @@ class TransactionSender:
             self.logger.error(f"Error retrieving Node ID: {e}")
             return None
 
-    def map_transaction_type_to_data_type(self, transaction_type):
-        mapping = {
-            "payment": "type_of_data",
-            "storage": "storage"
-        }
-        return mapping.get(transaction_type, "type_of_data")
-
     def construct_payload(self, node_id):
         transaction_type = self.config.get('payment')
         if node_id:
@@ -106,17 +88,17 @@ class TransactionSender:
                     "flags": 1,
                     "fee": 1,
                     "data_type": "type_of_data",
-        "data": {
-            "data": "some_data" 
-        },
-        "metadata": {
-            "meta": {
-                "value": "some_metadata_value"
+                    "data": {
+                        "data": "some_data"
+                    },
+                    "metadata": {
+                        "meta": {
+                            "value": "some_metadata_value"
+                        }
+                    },
+                    "model_type": "default_model"
+                }
             }
-        },
-        "model_type": "default_model"
-    }
-}
         else:
             payload = {
                 "secret": self.zkp_secret,
@@ -129,16 +111,16 @@ class TransactionSender:
                 "flags": 1,
                 "fee": 1,
                 "data_type": "type_of_data",
-        "data": {
-            "data": "some_data" 
-        },
-        "metadata": {
-            "meta": {
-                "value": "some_metadata_value"
+                "data": {
+                    "data": "some_data"
+                },
+                "metadata": {
+                    "meta": {
+                        "value": "some_metadata_value"
+                    }
+                },
+                "model_type": "default_model"
             }
-        },
-        "model_type": "default_model"
-    }
         return payload
 
     def mask_sensitive_data(self, payload):
@@ -149,59 +131,59 @@ class TransactionSender:
             masked_payload['data']['private_key'] = "*****"
         return masked_payload
 
-    def send_transaction(self, endpoint, payload, fallback_endpoint=None, fallback_payload=None):
+    async def send_transaction(self, session, endpoint, payload):
         try:
-            self.logger.debug(f"Payload being sent: {json.dumps(self.mask_sensitive_data(payload), indent=4)}")
-            response = self.session.post(endpoint, json=payload)
-            if response.status_code in [200, 201]:
-                self.logger.info(f"Transaction successful. Status Code: {response.status_code}")
-                try:
-                    response_json = response.json()
-                    pretty_response = json.dumps(response_json, indent=4)
-                    self.logger.info(f"Response:\n{pretty_response}")
-                except ValueError:
-                    self.logger.info(f"Response: {response.text}")
-            else:
-                self.logger.error(f"Failed to send transaction. Status Code: {response.status_code}")
-                try:
-                    response_json = response.json()
-                    pretty_response = json.dumps(response_json, indent=4)
-                    self.logger.error(f"Response:\n{pretty_response}")
-                except ValueError:
-                    self.logger.error(f"Response: {response.text}")
-                if fallback_endpoint and fallback_payload:
-                    self.logger.info("Attempting to send transaction to fallback endpoint...")
-                    self.send_transaction(fallback_endpoint, fallback_payload)
+            async with session.post(endpoint, json=payload) as response:
+                if response.status in [200, 201]:
+                    self.logger.info(f"Transaction successful. Status Code: {response.status}")
+                    try:
+                        response_text = await response.text()
+
+                        # If the response is not in JSON format, avoid printing the error
+                        if "Attempt to decode JSON with unexpected mimetype" in response_text:
+                            return  # Silently ignore the mimetype issue
+
+                        response_json = json.loads(response_text)
+                        pretty_response = json.dumps(response_json, indent=4)
+                        self.logger.info(f"Response:\n{pretty_response}")
+                    except ValueError:
+                        self.logger.info(f"Response: {response_text}")
+                else:
+                    self.logger.error(f"Failed to send transaction. Status Code: {response.status}")
+                    self.logger.error(f"Response: {await response.text()}")
         except Exception as e:
             self.logger.error(f"Error sending transaction: {e}")
-            if fallback_endpoint and fallback_payload:
-                self.logger.info("Attempting to send transaction to fallback endpoint...")
-                self.send_transaction(fallback_endpoint, fallback_payload)
 
-    def run(self):
+    async def run(self):
         node_id = self.get_node_id()
 
         if node_id:
             primary_endpoint = f"{self.config['base_url']}/receive_data"
-            fallback_endpoint = "https://node.synnq.io/receive_data"
             self.logger.info("Using custom validator endpoint.")
         else:
             primary_endpoint = "https://rest.synnq.io/transaction"
-            fallback_endpoint = None
             self.logger.info("Using default validator endpoint: https://rest.synnq.io/transaction")
 
-        primary_payload = self.construct_payload(node_id)
-        fallback_payload = self.construct_payload(None) if node_id else None
+        payload = self.construct_payload(node_id)
 
         num_times = self.config.get('num_times', 1)
-        count = 1
 
-        while num_times == 0 or count <= num_times:
-            target = f"Node ID: {node_id}" if node_id else "https://rest.synnq.io/transaction"
-            self.logger.info(f"Sending transaction {count}{'/' + str(num_times) if num_times else ''} to {target}...")
-            self.send_transaction(primary_endpoint, primary_payload, fallback_endpoint, fallback_payload)
-            count += 1
-            time.sleep(self.config.get('interval', 5))
+        # Start time
+        start_time = time.time()
+
+        # Create an async session and send all transactions concurrently
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for i in range(num_times):
+                tasks.append(self.send_transaction(session, primary_endpoint, payload))
+            await asyncio.gather(*tasks)
+
+        # End time and total duration
+        end_time = time.time()
+        total_duration = end_time - start_time
+
+        # Log total time taken and number of transactions
+        self.logger.info(f"Total time taken for {num_times} transactions: {total_duration:.2f} seconds.")
 
 def get_user_input():
     print("Enter the base URL of your validator.")
@@ -238,13 +220,12 @@ def get_user_input():
         "amount": amount,
         "denom": denom,
         "num_times": num_times,
-        "interval": 0.1,
     }
 
 if __name__ == "__main__":
     config = get_user_input()
     sender = TransactionSender(config)
     if sender.zkp_secret:
-        sender.run()
+        asyncio.run(sender.run())
     else:
         print("Failed to generate ZKP Secret. Exiting.")
